@@ -44,6 +44,11 @@ jobs:
           BUNDLE_ID: com.gyeningcorp.parkspot
           TEAM_ID: 4LZJ7U5FHS
 
+      - name: Set build number
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" Sources/IForGotParking/Info.plist
+          echo "Build number set to $GITHUB_RUN_NUMBER"
+
       - name: Generate all icon sizes from 1024px source
         run: |
           ICONDIR="Sources/IForGotParking/Assets.xcassets/AppIcon.appiconset"
