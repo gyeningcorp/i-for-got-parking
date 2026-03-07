@@ -122,7 +122,16 @@ async function main() {
     console.log(`✅ Registered bundle ID: ${bundleIdRecord.id}`);
   }
 
-  // 4. Create App Store distribution profile
+  // 4. Create App Store distribution profile (delete duplicates first)
+  console.log('📋 Checking for existing provisioning profiles...');
+  const existingProfiles = await apiCall('GET', '/v1/profiles?filter[name]=IForGotParking%20AppStore&filter[profileType]=IOS_APP_STORE');
+  if (existingProfiles.body.data && existingProfiles.body.data.length > 0) {
+    for (const p of existingProfiles.body.data) {
+      console.log(`🗑️  Deleting duplicate profile: ${p.id}`);
+      await apiCall('DELETE', `/v1/profiles/${p.id}`);
+    }
+  }
+
   console.log('📋 Creating App Store distribution provisioning profile...');
   const profileRes = await apiCall('POST', '/v1/profiles', {
     data: {
