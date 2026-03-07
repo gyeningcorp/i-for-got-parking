@@ -40,7 +40,7 @@ jobs:
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_PATH: ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          ASC_KEY_PATH: /Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           BUNDLE_ID: com.gyeningcorp.parkspot
           TEAM_ID: 4LZJ7U5FHS
 
@@ -79,4 +79,4 @@ jobs:
             --type ios \
             --apiKey ${{ secrets.ASC_KEY_ID }} \
             --apiIssuer ${{ secrets.ASC_ISSUER_ID }} \
-            --private-key @path:~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+            --private-key @path:/Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
