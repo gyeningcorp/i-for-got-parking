@@ -109,6 +109,7 @@ jobs:
 
 
 
+
       - name: Submit for App Store Review
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -175,32 +176,33 @@ jobs:
             console.log('Assign build:',ar.s);
             await new Promise(r=>setTimeout(r,3000));
 
-            // 4. Delete existing reviewSubmissions
+            // 4. Get existing reviewSubmissions - reuse one instead of creating (limit exceeded)
             const existRS=await call('GET',`/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[platform]=IOS`);
-            console.log('Existing submissions:',existRS.b.data?.length||0);
-            for(const rs of(existRS.b.data||[])){
-              const st=rs.attributes.state;
-              if(st==='IN_REVIEW'||st==='PENDING_APPLE_RELEASE'){console.log('Already reviewing:',st);return;}
-              if(st==='COMPLETE')continue;
-              console.log('Deleting:',rs.id,st);
-              const dr=await call('DELETE',`/v1/reviewSubmissions/${rs.id}`);
-              console.log('Delete:',dr.s);
-              await new Promise(r=>setTimeout(r,2000));
+            const submissions=existRS.b.data||[];
+            console.log('Existing submissions:',submissions.length,submissions.map(s=>s.attributes.state));
+
+            let rsId=null;
+            // Find a usable READY_FOR_REVIEW submission
+            const ready=submissions.find(s=>s.attributes.state==='READY_FOR_REVIEW');
+            if(ready){
+              rsId=ready.id;
+              console.log('Reusing submission:',rsId);
+            } else {
+              // Try to create if none usable
+              console.log('Creating new submission...');
+              const rsR=await call('POST','/v1/reviewSubmissions',{
+                data:{type:'reviewSubmissions',attributes:{platform:'IOS'},
+                  relationships:{app:{data:{type:'apps',id:APP_ID}}}}
+              });
+              console.log('Create:',rsR.s,rsR.b.data?.attributes?.state);
+              if(rsR.s!==201){console.log(JSON.stringify(rsR.b,null,2));process.exit(1);}
+              rsId=rsR.b.data.id;
             }
 
-            // 5. Create fresh reviewSubmission
-            console.log('Creating submission...');
-            const rsR=await call('POST','/v1/reviewSubmissions',{
-              data:{type:'reviewSubmissions',attributes:{platform:'IOS'},
-                relationships:{app:{data:{type:'apps',id:APP_ID}}}}
-            });
-            console.log('Create:',rsR.s,rsR.b.data?.attributes?.state);
-            if(rsR.s!==201){console.log(JSON.stringify(rsR.b,null,2));process.exit(1);}
-            const rsId=rsR.b.data.id;
             await new Promise(r=>setTimeout(r,3000));
 
-            // 6. Submit — attribute is "submitted: true" (not action: SUBMIT)
-            console.log('Submitting...');
+            // 5. Submit with submitted:true
+            console.log('Submitting with submitted:true...');
             const sr=await call('PATCH',`/v1/reviewSubmissions/${rsId}`,{
               data:{id:rsId,type:'reviewSubmissions',attributes:{submitted:true}}
             });
