@@ -65,7 +65,8 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE="$DIST_PROFILE_UUID" \
-            DEVELOPMENT_TEAM=4LZJ7U5FHS
+            DEVELOPMENT_TEAM=4LZJ7U5FHS \
+            CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER
 
       - name: Export IPA
         run: |
