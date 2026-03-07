@@ -106,10 +106,18 @@ async function main() {
   execSync(`openssl x509 -inform DER -in ${cerPath} -out ${pemPath}`);
   execSync(`openssl pkcs12 -export -out ${p12Path} -inkey ${distKeyPath} -in ${pemPath} -passout pass:TempP4ss!`);
 
-  // Import into default keychain
-  console.log('🔐 Importing certificate into keychain...');
-  execSync(`security import ${p12Path} -k ~/Library/Keychains/login.keychain-db -P "TempP4ss!" -T /usr/bin/codesign -T /usr/bin/security`);
-  execSync(`security set-key-partition-list -S apple-tool:,apple: -s -k "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true`);
+  // Create a dedicated build keychain that never locks and never prompts
+  console.log('🔐 Setting up build keychain...');
+  const KEYCHAIN = '/Users/runner/Library/Keychains/build.keychain-db';
+  const KEYCHAIN_PASS = 'build_ci_pass';
+  execSync(`security create-keychain -p "${KEYCHAIN_PASS}" "${KEYCHAIN}" 2>/dev/null || true`);
+  execSync(`security set-keychain-settings -lut 21600 "${KEYCHAIN}"`);
+  execSync(`security unlock-keychain -p "${KEYCHAIN_PASS}" "${KEYCHAIN}"`);
+  // Add to keychain search list
+  execSync(`security list-keychains -d user -s "${KEYCHAIN}" ~/Library/Keychains/login.keychain-db`);
+  // Import cert into build keychain
+  execSync(`security import ${p12Path} -k "${KEYCHAIN}" -P "TempP4ss!" -T /usr/bin/codesign -T /usr/bin/security -A`);
+  execSync(`security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASS}" "${KEYCHAIN}"`);
 
   // 3. Get bundleId record
   console.log('📦 Looking up Bundle ID...');
