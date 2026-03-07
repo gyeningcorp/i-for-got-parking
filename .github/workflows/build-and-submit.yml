@@ -44,12 +44,17 @@ jobs:
           BUNDLE_ID: com.gyeningcorp.parkspot
           TEAM_ID: 4LZJ7U5FHS
 
-      - name: Remove alpha from app icon
+      - name: Generate all icon sizes from 1024px source
         run: |
-          ICON="Sources/IForGotParking/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
-          sips -s format png "$ICON" --out "$ICON" --setProperty hasAlpha false 2>/dev/null || \
-          sips -s format bmp "$ICON" --out /tmp/icon_flat.bmp && \
-          sips -s format png /tmp/icon_flat.bmp --out "$ICON"
+          ICONDIR="Sources/IForGotParking/Assets.xcassets/AppIcon.appiconset"
+          SRC="$ICONDIR/icon-1024.png"
+          # Strip alpha channel first
+          sips -s format bmp "$SRC" --out /tmp/icon_flat.bmp
+          sips -s format png /tmp/icon_flat.bmp --out "$SRC"
+          # Generate all required sizes
+          for SIZE in 20 29 40 58 60 76 80 87 120 152 167 180; do
+            sips -z $SIZE $SIZE "$SRC" --out "$ICONDIR/icon-${SIZE}.png"
+          done
 
       - name: Archive app
         run: |
