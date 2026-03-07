@@ -65,10 +65,10 @@ async function main() {
   const TMP = process.env.RUNNER_TEMP || '/tmp';
 
   // 1. Generate distribution private key + CSR
-  console.log('🔑 Generating distribution key pair...');
+  console.log('🔑 Generating distribution key pair (RSA 2048)...');
   const distKeyPath = path.join(TMP, 'dist_key.pem');
   const csrPath     = path.join(TMP, 'dist.csr');
-  execSync(`openssl ecparam -name prime256v1 -genkey -noout -out ${distKeyPath}`);
+  execSync(`openssl genrsa -out ${distKeyPath} 2048`);
   execSync(`openssl req -new -key ${distKeyPath} -out ${csrPath} -subj "/CN=iPhone Distribution: Christopher Gyening/O=Christopher Gyening/C=US"`);
   const csrDer = execSync(`openssl req -in ${csrPath} -outform DER`);
   const csrB64 = csrDer.toString('base64');
