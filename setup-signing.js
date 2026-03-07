@@ -73,7 +73,16 @@ async function main() {
   const csrDer = execSync(`openssl req -in ${csrPath} -outform DER`);
   const csrB64 = csrDer.toString('base64');
 
-  // 2. Submit CSR to Apple → get distribution certificate
+  // 2. Delete any existing iOS Distribution certificates, then create fresh one
+  console.log('🧹 Removing existing iOS Distribution certificates...');
+  const existingCerts = await apiCall('GET', '/v1/certificates?filter[certificateType]=IOS_DISTRIBUTION');
+  if (existingCerts.body.data && existingCerts.body.data.length > 0) {
+    for (const c of existingCerts.body.data) {
+      console.log(`🗑️  Deleting cert: ${c.id}`);
+      await apiCall('DELETE', `/v1/certificates/${c.id}`);
+    }
+  }
+
   console.log('📜 Creating iOS Distribution certificate via ASC API...');
   const certRes = await apiCall('POST', '/v1/certificates', {
     data: {
