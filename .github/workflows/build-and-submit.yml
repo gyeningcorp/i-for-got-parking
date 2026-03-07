@@ -44,6 +44,13 @@ jobs:
           BUNDLE_ID: com.gyeningcorp.parkspot
           TEAM_ID: 4LZJ7U5FHS
 
+      - name: Remove alpha from app icon
+        run: |
+          ICON="Sources/IForGotParking/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+          sips -s format png "$ICON" --out "$ICON" --setProperty hasAlpha false 2>/dev/null || \
+          sips -s format bmp "$ICON" --out /tmp/icon_flat.bmp && \
+          sips -s format png /tmp/icon_flat.bmp --out "$ICON"
+
       - name: Archive app
         run: |
           xcodebuild archive \
