@@ -27,8 +27,11 @@
         <key>UIApplicationSupportsMultipleScenes</key>
         <false/>
     </dict>
-    <key>UILaunchStoryboardName</key>
-    <string>LaunchScreen</string>
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string>launchBackground</string>
+    </dict>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>UISupportedInterfaceOrientations</key>
