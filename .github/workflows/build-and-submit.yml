@@ -21,23 +21,39 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: true
-
-      - name: Install Fastlane
-        run: gem install fastlane --no-document
-
-      - name: Write ASC API Key to file
+      - name: Place ASC API Key
         run: |
-          echo "${{ secrets.ASC_PRIVATE_KEY }}" > /tmp/asc_key.p8
-          chmod 600 /tmp/asc_key.p8
+          mkdir -p ~/.private_keys
+          echo "${{ secrets.ASC_PRIVATE_KEY }}" > ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          chmod 600 ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
 
-      - name: Build & Upload to App Store
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_KEY_FILEPATH: /tmp/asc_key.p8
-        run: fastlane release
+      - name: Archive app
+        run: |
+          xcodebuild archive \
+            -scheme IForGotParking \
+            -archivePath $RUNNER_TEMP/IForGotParking.xcarchive \
+            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
+            -allowProvisioningUpdates \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=4LZJ7U5FHS
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/IForGotParking.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist ExportOptions.plist \
+            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
+            -allowProvisioningUpdates
+
+      - name: Upload to TestFlight
+        run: |
+          xcrun altool --upload-app \
+            --file $RUNNER_TEMP/export/IForGotParking.ipa \
+            --type ios \
+            --apiKey ${{ secrets.ASC_KEY_ID }} \
+            --apiIssuer ${{ secrets.ASC_ISSUER_ID }}
