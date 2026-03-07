@@ -48,10 +48,10 @@ jobs:
         run: |
           ICONDIR="Sources/IForGotParking/Assets.xcassets/AppIcon.appiconset"
           SRC="$ICONDIR/icon-1024.png"
-          # Strip alpha channel first
-          sips -s format bmp "$SRC" --out /tmp/icon_flat.bmp
-          sips -s format png /tmp/icon_flat.bmp --out "$SRC"
-          # Generate all required sizes
+          # Strip alpha channel (convert to JPEG and back removes alpha completely)
+          sips -s format jpeg "$SRC" --out /tmp/icon_flat.jpg
+          sips -s format png /tmp/icon_flat.jpg --out "$SRC"
+          # Generate all required pixel-exact sizes
           for SIZE in 20 29 40 58 60 76 80 87 120 152 167 180; do
             sips -z $SIZE $SIZE "$SRC" --out "$ICONDIR/icon-${SIZE}.png"
           done
