@@ -13,6 +13,8 @@ targets:
       - path: Sources/IForGotParking
     info:
       path: Sources/IForGotParking/Info.plist
+    entitlements:
+      path: Sources/IForGotParking/IForGotParking.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gyeningcorp.parkspot
