@@ -28,12 +28,16 @@ jobs:
           bundler-cache: true
 
       - name: Install Fastlane
-        run: gem install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Write ASC API Key to file
+        run: |
+          echo "${{ secrets.ASC_PRIVATE_KEY }}" > /tmp/asc_key.p8
+          chmod 600 /tmp/asc_key.p8
 
       - name: Build & Upload to App Store
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          ASC_KEY_FILEPATH: /tmp/asc_key.p8
         run: fastlane release
