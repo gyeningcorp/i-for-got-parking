@@ -48,6 +48,7 @@ jobs:
         run: |
           xcodebuild archive \
             -scheme IForGotParking \
+            -destination "generic/platform=iOS" \
             -archivePath $RUNNER_TEMP/IForGotParking.xcarchive \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
