@@ -18,7 +18,14 @@ struct WebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.isOpaque = false
         webView.backgroundColor = UIColor(red: 0.10, green: 0.45, blue: 0.91, alpha: 1)
-        webView.scrollView.bounces = false
+        webView.scrollView.bounces = true
+
+        // Native pull-to-refresh
+        let refresh = UIRefreshControl()
+        refresh.tintColor = .white
+        refresh.addTarget(context.coordinator, action: #selector(Coordinator.handleRefresh(_:)), for: .valueChanged)
+        webView.scrollView.refreshControl = refresh
+
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -39,6 +46,13 @@ struct WebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             parent.isLoading = false
+            webView.scrollView.refreshControl?.endRefreshing()
+        }
+
+        @objc func handleRefresh(_ sender: UIRefreshControl) {
+            if let webView = sender.superview?.superview as? WKWebView {
+                webView.reload()
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
