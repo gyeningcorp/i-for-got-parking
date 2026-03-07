@@ -21,39 +21,62 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Place ASC API Key
+      - name: Write ASC API Key
         run: |
           mkdir -p ~/.private_keys
-          echo "${{ secrets.ASC_PRIVATE_KEY }}" > ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
-          chmod 600 ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          printf '%s' "$ASC_PRIVATE_KEY" > ~/.private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/.private_keys/AuthKey_${ASC_KEY_ID}.p8
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup code signing (cert + profile via ASC API)
+        run: node setup-signing.js
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          BUNDLE_ID: com.gyeningcorp.parkspot
+          TEAM_ID: 4LZJ7U5FHS
 
       - name: Archive app
         run: |
           xcodebuild archive \
             -scheme IForGotParking \
             -archivePath $RUNNER_TEMP/IForGotParking.xcarchive \
-            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
-            -allowProvisioningUpdates \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
+            PROVISIONING_PROFILE="$DIST_PROFILE_UUID" \
             DEVELOPMENT_TEAM=4LZJ7U5FHS
 
       - name: Export IPA
         run: |
+          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store</string>
+            <key>teamID</key><string>4LZJ7U5FHS</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict><key>com.gyeningcorp.parkspot</key><string>$DIST_PROFILE_UUID</string></dict>
+          </dict></plist>
+          EOF
           xcodebuild -exportArchive \
             -archivePath $RUNNER_TEMP/IForGotParking.xcarchive \
             -exportPath $RUNNER_TEMP/export \
-            -exportOptionsPlist ExportOptions.plist \
-            -authenticationKeyPath ~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
-            -allowProvisioningUpdates
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
 
       - name: Upload to TestFlight
         run: |
           xcrun altool --upload-app \
-            --file $RUNNER_TEMP/export/IForGotParking.ipa \
+            --file "$RUNNER_TEMP/export/IForGotParking.ipa" \
             --type ios \
             --apiKey ${{ secrets.ASC_KEY_ID }} \
-            --apiIssuer ${{ secrets.ASC_ISSUER_ID }}
+            --apiIssuer ${{ secrets.ASC_ISSUER_ID }} \
+            --private-key @path:~/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
