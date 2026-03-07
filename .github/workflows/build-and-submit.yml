@@ -57,7 +57,6 @@ jobs:
           for SIZE in 20 29 40 58 60 76 80 87 120 152 167 180 1024; do
             sips -z $SIZE $SIZE "$SRC" --out "$DIR/icon-${SIZE}.png" > /dev/null 2>&1
           done
-          # Strip alpha via JPEG round-trip
           for PNG in "$DIR"/icon-*.png; do
             TMP="${PNG%.png}_tmp.jpg"
             sips -s format jpeg "$PNG" --out "$TMP" > /dev/null 2>&1
@@ -146,7 +145,10 @@ jobs:
               }, res => {
                 let x = '';
                 res.on('data', c => x += c);
-                res.on('end', () => { try { resolve({s: res.statusCode, b: JSON.parse(x)}); } catch { resolve({s: res.statusCode, b: x}); }});
+                res.on('end', () => {
+                  try { resolve({s: res.statusCode, b: JSON.parse(x)}); }
+                  catch { resolve({s: res.statusCode, b: x}); }
+                });
               });
               req.on('error', reject);
               if (data) req.write(data);
@@ -155,38 +157,34 @@ jobs:
           }
 
           async function main() {
-            // 1. Check if already submitted
+            // 1. Get app store version
             const vr = await call('GET', `/v1/apps/${APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,PENDING_APPLE_RELEASE`);
             const versions = vr.b.data || [];
-            console.log('Versions found:', versions.map(v => `${v.attributes.versionString}:${v.attributes.appStoreState}`));
+            console.log('Versions:', versions.map(v => v.attributes.versionString + ':' + v.attributes.appStoreState));
 
-            const alreadySubmitted = versions.find(v => ['WAITING_FOR_REVIEW','IN_REVIEW','PENDING_APPLE_RELEASE'].includes(v.attributes.appStoreState));
-            if (alreadySubmitted) {
-              console.log('SUCCESS: App already in review state:', alreadySubmitted.attributes.appStoreState);
-              return;
-            }
+            const inReview = versions.find(v => ['WAITING_FOR_REVIEW','IN_REVIEW','PENDING_APPLE_RELEASE'].includes(v.attributes.appStoreState));
+            if (inReview) { console.log('Already under Apple review:', inReview.attributes.appStoreState); return; }
 
             const version = versions.find(v => v.attributes.appStoreState === 'PREPARE_FOR_SUBMISSION');
-            if (!version) { console.log('No submittable version found'); console.log(JSON.stringify(vr.b, null, 2)); return; }
+            if (!version) { console.log('No version to submit'); return; }
             const versionId = version.id;
             console.log('Version ID:', versionId);
 
-            // 2. Wait for latest valid build (not build 1)
+            // 2. Wait for latest valid build
             console.log('Waiting for build...');
             let buildId;
             for (let i = 0; i < 20; i++) {
               await new Promise(r => setTimeout(r, 30000));
-              const r = await call('GET', `/v1/builds?filter[app]=${APP_ID}&sort=-uploadedDate&limit=5`);
+              const r = await call('GET', `/v1/builds?filter[app]=${APP_ID}&sort=-uploadedDate&limit=10`);
               for (const b of (r.b.data || [])) {
-                console.log(`Build ${b.attributes.version}: ${b.attributes.processingState}`);
+                console.log('Build', b.attributes.version, b.attributes.processingState);
                 if (b.attributes.processingState === 'VALID' && b.attributes.version !== '1') {
-                  buildId = b.id;
-                  break;
+                  buildId = b.id; break;
                 }
               }
               if (buildId) break;
             }
-            if (!buildId) { console.log('No valid build found'); return; }
+            if (!buildId) { console.log('No valid build'); return; }
             console.log('Build ID:', buildId);
 
             // 3. Assign build to version
@@ -194,20 +192,24 @@ jobs:
             console.log('Assign build:', ar.s);
             await new Promise(r => setTimeout(r, 3000));
 
-            // 4. Delete any existing draft reviewSubmissions for this app
+            // 4. CANCEL ALL existing review submissions (even READY_FOR_REVIEW ones with 0 items)
+            console.log('Checking existing submissions...');
             const existRS = await call('GET', `/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[platform]=IOS`);
             for (const rs of (existRS.b.data || [])) {
-              if (rs.attributes.state === 'READY_FOR_REVIEW' || rs.attributes.state === 'WAITING_FOR_REVIEW') {
-                console.log('Existing submission state:', rs.attributes.state, '- already submitted!');
-                return;
-              }
-              if (rs.attributes.state === 'CANCELING' || rs.attributes.state === 'COMPLETE') continue;
-              console.log('Canceling existing submission:', rs.id, rs.attributes.state);
-              await call('PATCH', `/v1/reviewSubmissions/${rs.id}`, {data: {type: 'reviewSubmissions', id: rs.id, attributes: {action: 'CANCEL'}}});
-              await new Promise(r => setTimeout(r, 2000));
+              const st = rs.attributes.state;
+              console.log('Found submission:', rs.id, 'state:', st);
+              if (st === 'IN_REVIEW' || st === 'PENDING_APPLE_RELEASE') { console.log('Under review already!'); return; }
+              if (st === 'COMPLETE' || st === 'CANCELING') continue;
+              // Cancel everything else (including READY_FOR_REVIEW with 0 items)
+              console.log('Canceling submission:', rs.id);
+              const cr = await call('PATCH', `/v1/reviewSubmissions/${rs.id}`, {
+                data: {type: 'reviewSubmissions', id: rs.id, attributes: {action: 'CANCEL'}}
+              });
+              console.log('Cancel result:', cr.s, JSON.stringify(cr.b).slice(0, 200));
+              await new Promise(r => setTimeout(r, 3000));
             }
 
-            // 5. Create new review submission
+            // 5. Create fresh review submission
             console.log('Creating review submission...');
             const rsR = await call('POST', '/v1/reviewSubmissions', {
               data: {
@@ -217,9 +219,11 @@ jobs:
               }
             });
             console.log('Create submission:', rsR.s);
-            if (rsR.s !== 201) { console.log(JSON.stringify(rsR.b, null, 2)); return; }
+            if (rsR.s !== 201) { console.log(JSON.stringify(rsR.b, null, 2)); process.exit(1); }
             const rsId = rsR.b.data.id;
-            console.log('Submission ID:', rsId);
+            const rsState = rsR.b.data.attributes.state;
+            console.log('Submission ID:', rsId, 'State:', rsState);
+            await new Promise(r => setTimeout(r, 5000));
 
             // 6. Add app store version as review item
             console.log('Adding review item...');
@@ -233,11 +237,13 @@ jobs:
               }
             });
             console.log('Add item:', itemR.s);
-            if (itemR.s !== 201) console.log(JSON.stringify(itemR.b, null, 2));
-            await new Promise(r => setTimeout(r, 2000));
+            if (itemR.s !== 201) {
+              console.log('ITEM ERROR:', JSON.stringify(itemR.b, null, 2));
+            }
+            await new Promise(r => setTimeout(r, 3000));
 
             // 7. Submit
-            console.log('Submitting for review...');
+            console.log('Submitting...');
             const sr = await call('PATCH', `/v1/reviewSubmissions/${rsId}`, {
               data: {type: 'reviewSubmissions', id: rsId, attributes: {action: 'SUBMIT'}}
             });
@@ -245,7 +251,7 @@ jobs:
             if (sr.s === 200 || sr.s === 201) {
               console.log('SUCCESS: I For Got Parking submitted for App Store Review!');
             } else {
-              console.log(JSON.stringify(sr.b, null, 2));
+              console.log('SUBMIT ERROR:', JSON.stringify(sr.b, null, 2));
               process.exit(1);
             }
           }
