@@ -41,6 +41,7 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_KEY_PATH: /Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
           TEAM_ID: 4LZJ7U5FHS
           BUNDLE_ID: com.gyeningcorp.parkspot
 
