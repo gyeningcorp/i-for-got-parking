@@ -166,10 +166,36 @@ jobs:
             
             await new Promise(r=>setTimeout(r,3000));
             
+            // Check current state
+            const stateR = await call('GET',`/v1/appStoreVersions/${versionId}`);
+            const state = stateR.b.data?.attributes?.appStoreState;
+            console.log('Version state: '+state);
+            if(state==='WAITING_FOR_REVIEW'||state==='IN_REVIEW'||state==='PENDING_APPLE_RELEASE') {
+              console.log('SUCCESS: Already submitted/in review!'); return;
+            }
+
+            // Delete any existing submission first
+            const existSub = await call('GET',`/v1/appStoreVersions/${versionId}/appStoreVersionSubmission`);
+            if(existSub.s===200 && existSub.b.data?.id) {
+              console.log('Deleting old submission...');
+              await call('DELETE',`/v1/appStoreVersionSubmissions/${existSub.b.data.id}`);
+            }
+
+            // Use new reviewSubmissions API
+            console.log('Creating review submission...');
+            const rs = await call('POST','/v1/reviewSubmissions',{data:{type:'reviewSubmissions',attributes:{platform:'IOS'},relationships:{app:{data:{type:'apps',id:APP_ID}}}}});
+            console.log('ReviewSub create: '+rs.s);
+            if(rs.s!==201){console.log('Response:',JSON.stringify(rs.b,null,2));return;}
+            const rsId = rs.b.data.id;
+
+            // Add version item
+            const ri = await call('POST',`/v1/reviewSubmissions/${rsId}/items`,{data:{type:'reviewSubmissionItems',relationships:{appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}});
+            console.log('Add item: '+ri.s);
+
             // Submit
-            const sr = await call('POST','/v1/appStoreVersionSubmissions',{data:{type:'appStoreVersionSubmissions',relationships:{appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}});
+            const sr = await call('PATCH',`/v1/reviewSubmissions/${rsId}`,{data:{type:'reviewSubmissions',id:rsId,attributes:{action:'SUBMIT'}}});
             console.log('Submit: '+sr.s);
-            if(sr.s===201||sr.s===200) console.log('SUCCESS: Submitted for App Store Review!');
+            if(sr.s===200||sr.s===201) console.log('SUCCESS: Submitted for App Store Review!');
             else console.log('Submit response:',JSON.stringify(sr.b,null,2));
           }
           
