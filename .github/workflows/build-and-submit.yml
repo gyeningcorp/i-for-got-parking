@@ -107,6 +107,7 @@ jobs:
             --apiIssuer ${{ secrets.ASC_ISSUER_ID }} \
             --private-key @path:/Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
 
+
       - name: Submit for App Store Review
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -128,133 +129,84 @@ jobs:
             const h = Buffer.from(JSON.stringify({alg:'ES256',kid:KEY_ID,typ:'JWT'})).toString('base64url');
             const n = Math.floor(Date.now()/1000);
             const p = Buffer.from(JSON.stringify({iss:ISSUER,iat:n,exp:n+1200,aud:'appstoreconnect-v1'})).toString('base64url');
-            const s = crypto.createSign('SHA256').update(`${h}.${p}`).sign({key, dsaEncoding:'ieee-p1363'}).toString('base64url');
+            const s = crypto.createSign('SHA256').update(`${h}.${p}`).sign({key,dsaEncoding:'ieee-p1363'}).toString('base64url');
             return `${h}.${p}.${s}`;
           }
-
-          function call(method, path, body) {
-            return new Promise((resolve, reject) => {
-              const data = body ? JSON.stringify(body) : undefined;
-              const req = https.request({
-                hostname: 'api.appstoreconnect.apple.com', path, method,
-                headers: {
-                  Authorization: `Bearer ${jwt()}`,
-                  'Content-Type': 'application/json',
-                  ...(data ? {'Content-Length': Buffer.byteLength(data)} : {})
-                }
-              }, res => {
-                let x = '';
-                res.on('data', c => x += c);
-                res.on('end', () => {
-                  try { resolve({s: res.statusCode, b: JSON.parse(x)}); }
-                  catch { resolve({s: res.statusCode, b: x}); }
-                });
-              });
-              req.on('error', reject);
-              if (data) req.write(data);
-              req.end();
+          function call(method,path,body){
+            return new Promise((res,rej)=>{
+              const d=body?JSON.stringify(body):undefined;
+              const r=https.request({hostname:'api.appstoreconnect.apple.com',path,method,
+                headers:{Authorization:`Bearer ${jwt()}`,'Content-Type':'application/json',...(d?{'Content-Length':Buffer.byteLength(d)}:{})}
+              },resp=>{let x='';resp.on('data',c=>x+=c);resp.on('end',()=>{try{res({s:resp.statusCode,b:JSON.parse(x)})}catch{res({s:resp.statusCode,b:x})}});});
+              r.on('error',rej);if(d)r.write(d);r.end();
             });
           }
 
-          async function main() {
-            // 1. Get app store version
-            const vr = await call('GET', `/v1/apps/${APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,PENDING_APPLE_RELEASE`);
-            const versions = vr.b.data || [];
-            console.log('Versions:', versions.map(v => v.attributes.versionString + ':' + v.attributes.appStoreState));
+          async function main(){
+            // 1. Check if already in review
+            const vr=await call('GET',`/v1/apps/${APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,PENDING_APPLE_RELEASE`);
+            const versions=vr.b.data||[];
+            console.log('Versions:',versions.map(v=>v.attributes.versionString+':'+v.attributes.appStoreState));
+            const done=versions.find(v=>['WAITING_FOR_REVIEW','IN_REVIEW','PENDING_APPLE_RELEASE'].includes(v.attributes.appStoreState));
+            if(done){console.log('Already under review:',done.attributes.appStoreState);return;}
+            const version=versions.find(v=>v.attributes.appStoreState==='PREPARE_FOR_SUBMISSION');
+            if(!version){console.log('No version to submit');return;}
+            const versionId=version.id;
+            console.log('Version:',versionId);
 
-            const inReview = versions.find(v => ['WAITING_FOR_REVIEW','IN_REVIEW','PENDING_APPLE_RELEASE'].includes(v.attributes.appStoreState));
-            if (inReview) { console.log('Already under Apple review:', inReview.attributes.appStoreState); return; }
-
-            const version = versions.find(v => v.attributes.appStoreState === 'PREPARE_FOR_SUBMISSION');
-            if (!version) { console.log('No version to submit'); return; }
-            const versionId = version.id;
-            console.log('Version ID:', versionId);
-
-            // 2. Wait for latest valid build
+            // 2. Wait for valid build (not build 1)
             console.log('Waiting for build...');
             let buildId;
-            for (let i = 0; i < 20; i++) {
-              await new Promise(r => setTimeout(r, 30000));
-              const r = await call('GET', `/v1/builds?filter[app]=${APP_ID}&sort=-uploadedDate&limit=10`);
-              for (const b of (r.b.data || [])) {
-                console.log('Build', b.attributes.version, b.attributes.processingState);
-                if (b.attributes.processingState === 'VALID' && b.attributes.version !== '1') {
-                  buildId = b.id; break;
-                }
+            for(let i=0;i<20;i++){
+              await new Promise(r=>setTimeout(r,30000));
+              const r=await call('GET',`/v1/builds?filter[app]=${APP_ID}&sort=-uploadedDate&limit=10`);
+              for(const b of(r.b.data||[])){
+                console.log('Build',b.attributes.version,b.attributes.processingState);
+                if(b.attributes.processingState==='VALID'&&b.attributes.version!=='1'){buildId=b.id;break;}
               }
-              if (buildId) break;
+              if(buildId)break;
             }
-            if (!buildId) { console.log('No valid build'); return; }
-            console.log('Build ID:', buildId);
+            if(!buildId){console.log('No valid build');return;}
+            console.log('Build:',buildId);
 
             // 3. Assign build to version
-            const ar = await call('PATCH', `/v1/appStoreVersions/${versionId}/relationships/build`, {data: {type: 'builds', id: buildId}});
-            console.log('Assign build:', ar.s);
-            await new Promise(r => setTimeout(r, 3000));
+            const ar=await call('PATCH',`/v1/appStoreVersions/${versionId}/relationships/build`,{data:{type:'builds',id:buildId}});
+            console.log('Assign build:',ar.s);
+            await new Promise(r=>setTimeout(r,3000));
 
-            // 4. CANCEL ALL existing review submissions (even READY_FOR_REVIEW ones with 0 items)
-            console.log('Checking existing submissions...');
-            const existRS = await call('GET', `/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[platform]=IOS`);
-            for (const rs of (existRS.b.data || [])) {
-              const st = rs.attributes.state;
-              console.log('Found submission:', rs.id, 'state:', st);
-              if (st === 'IN_REVIEW' || st === 'PENDING_APPLE_RELEASE') { console.log('Under review already!'); return; }
-              if (st === 'COMPLETE' || st === 'CANCELING') continue;
-              // Cancel everything else (including READY_FOR_REVIEW with 0 items)
-              console.log('Canceling submission:', rs.id);
-              const cr = await call('PATCH', `/v1/reviewSubmissions/${rs.id}`, {
-                data: {type: 'reviewSubmissions', id: rs.id, attributes: {action: 'CANCEL'}}
-              });
-              console.log('Cancel result:', cr.s, JSON.stringify(cr.b).slice(0, 200));
-              await new Promise(r => setTimeout(r, 3000));
+            // 4. DELETE all existing reviewSubmissions (cannot cancel via PATCH - action attr not supported)
+            const existRS=await call('GET',`/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[platform]=IOS`);
+            for(const rs of(existRS.b.data||[])){
+              const st=rs.attributes.state;
+              if(st==='IN_REVIEW'||st==='PENDING_APPLE_RELEASE'){console.log('Under review:',st);return;}
+              if(st==='COMPLETE')continue;
+              console.log('Deleting submission:',rs.id,'state:',st);
+              const dr=await call('DELETE',`/v1/reviewSubmissions/${rs.id}`);
+              console.log('Delete result:',dr.s);
+              await new Promise(r=>setTimeout(r,2000));
             }
 
-            // 5. Create fresh review submission
-            console.log('Creating review submission...');
-            const rsR = await call('POST', '/v1/reviewSubmissions', {
-              data: {
-                type: 'reviewSubmissions',
-                attributes: {platform: 'IOS'},
-                relationships: {app: {data: {type: 'apps', id: APP_ID}}}
-              }
-            });
-            console.log('Create submission:', rsR.s);
-            if (rsR.s !== 201) { console.log(JSON.stringify(rsR.b, null, 2)); process.exit(1); }
-            const rsId = rsR.b.data.id;
-            const rsState = rsR.b.data.attributes.state;
-            console.log('Submission ID:', rsId, 'State:', rsState);
-            await new Promise(r => setTimeout(r, 5000));
-
-            // 6. Add app store version as review item
-            console.log('Adding review item...');
-            const itemR = await call('POST', '/v1/reviewSubmissionItems', {
-              data: {
-                type: 'reviewSubmissionItems',
-                relationships: {
-                  reviewSubmission: {data: {type: 'reviewSubmissions', id: rsId}},
-                  appStoreVersion: {data: {type: 'appStoreVersions', id: versionId}}
-                }
-              }
-            });
-            console.log('Add item:', itemR.s);
-            if (itemR.s !== 201) {
-              console.log('ITEM ERROR:', JSON.stringify(itemR.b, null, 2));
+            // 5. Also delete existing appStoreVersionSubmission if any (old API artifact)
+            const existSub=await call('GET',`/v1/appStoreVersions/${versionId}/appStoreVersionSubmission`);
+            if(existSub.s===200&&existSub.b.data?.id){
+              console.log('Deleting old appStoreVersionSubmission:',existSub.b.data.id);
+              const delR=await call('DELETE',`/v1/appStoreVersionSubmissions/${existSub.b.data.id}`);
+              console.log('Delete old sub:',delR.s);
+              await new Promise(r=>setTimeout(r,3000));
             }
-            await new Promise(r => setTimeout(r, 3000));
 
-            // 7. Submit
-            console.log('Submitting...');
-            const sr = await call('PATCH', `/v1/reviewSubmissions/${rsId}`, {
-              data: {type: 'reviewSubmissions', id: rsId, attributes: {action: 'SUBMIT'}}
+            // 6. POST fresh appStoreVersionSubmissions (simple, direct)
+            console.log('Submitting via appStoreVersionSubmissions...');
+            const sr=await call('POST','/v1/appStoreVersionSubmissions',{
+              data:{type:'appStoreVersionSubmissions',relationships:{appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}
             });
-            console.log('Submit:', sr.s);
-            if (sr.s === 200 || sr.s === 201) {
+            console.log('Submit:',sr.s);
+            if(sr.s===201||sr.s===200){
               console.log('SUCCESS: I For Got Parking submitted for App Store Review!');
             } else {
-              console.log('SUBMIT ERROR:', JSON.stringify(sr.b, null, 2));
+              console.log('SUBMIT ERROR:',JSON.stringify(sr.b,null,2));
               process.exit(1);
             }
           }
-
-          main().catch(e => { console.log('Error:', e.message); process.exit(1); });
+          main().catch(e=>{console.log('Error:',e.message);process.exit(1);});
           JSEOF
