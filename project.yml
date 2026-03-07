@@ -1,0 +1,25 @@
+name: IForGotParking
+options:
+  bundleIdPrefix: com.gyeningcorp
+  deploymentTarget:
+    iOS: "15.0"
+  xcodeVersion: "15"
+
+targets:
+  IForGotParking:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/IForGotParking
+    info:
+      path: Sources/IForGotParking/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gyeningcorp.parkspot
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 4LZJ7U5FHS
