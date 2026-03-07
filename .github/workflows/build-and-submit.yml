@@ -99,3 +99,79 @@ jobs:
             --apiKey ${{ secrets.ASC_KEY_ID }} \
             --apiIssuer ${{ secrets.ASC_ISSUER_ID }} \
             --private-key @path:/Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+
+      - name: Submit for App Store Review
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_PATH: /Users/runner/.private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          APP_ID: "6760226960"
+        run: |
+          node - <<'EOF'
+          const https = require('https');
+          const crypto = require('crypto');
+          const fs = require('fs');
+          
+          const KEY_ID = process.env.ASC_KEY_ID;
+          const ISSUER = process.env.ASC_ISSUER_ID;
+          const KEY_PATH = process.env.ASC_KEY_PATH;
+          const APP_ID = process.env.APP_ID;
+          
+          function jwt() {
+            const key = fs.readFileSync(KEY_PATH,'utf8');
+            const h = Buffer.from(JSON.stringify({alg:'ES256',kid:KEY_ID,typ:'JWT'})).toString('base64url');
+            const n = Math.floor(Date.now()/1000);
+            const p = Buffer.from(JSON.stringify({iss:ISSUER,iat:n,exp:n+1200,aud:'appstoreconnect-v1'})).toString('base64url');
+            const s = crypto.createSign('SHA256').update(`${h}.${p}`).sign({key,dsaEncoding:'ieee-p1363'}).toString('base64url');
+            return `${h}.${p}.${s}`;
+          }
+          
+          function call(method, path, body) {
+            return new Promise((res,rej) => {
+              const d = body ? JSON.stringify(body) : undefined;
+              const r = https.request({hostname:'api.appstoreconnect.apple.com',path,method,
+                headers:{Authorization:`Bearer ${jwt()}`,'Content-Type':'application/json',...(d?{'Content-Length':Buffer.byteLength(d)}:{})}
+              }, resp => { let x=''; resp.on('data',c=>x+=c); resp.on('end',()=>{try{res({s:resp.statusCode,b:JSON.parse(x)})}catch{res({s:resp.statusCode,b:x})}}); });
+              r.on('error',rej); if(d) r.write(d); r.end();
+            });
+          }
+          
+          async function main() {
+            // Wait for build to be valid
+            console.log('Waiting for build to be VALID in TestFlight...');
+            let buildId;
+            for(let i=0;i<20;i++) {
+              await new Promise(r=>setTimeout(r,30000));
+              const r = await call('GET',`/v1/builds?filter[app]=${APP_ID}&sort=-uploadedDate&limit=5`);
+              for(const b of (r.b.data||[])) {
+                console.log(`Build ${b.attributes.version}: ${b.attributes.processingState}`);
+                if(b.attributes.processingState==='VALID' && b.attributes.version !== '1') {
+                  buildId=b.id; break;
+                }
+              }
+              if(buildId) break;
+            }
+            if(!buildId){console.log('No valid build found');return;}
+            console.log('Found build: '+buildId);
+            
+            // Get version
+            const vr = await call('GET',`/v1/apps/${APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION`);
+            const versionId = vr.b.data?.[0]?.id;
+            if(!versionId){console.log('No version found:',JSON.stringify(vr.b));return;}
+            console.log('Version: '+versionId);
+            
+            // Assign build
+            const ar = await call('PATCH',`/v1/appStoreVersions/${versionId}/relationships/build`,{data:{type:'builds',id:buildId}});
+            console.log('Assign: '+ar.s);
+            
+            await new Promise(r=>setTimeout(r,3000));
+            
+            // Submit
+            const sr = await call('POST','/v1/appStoreVersionSubmissions',{data:{type:'appStoreVersionSubmissions',relationships:{appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}});
+            console.log('Submit: '+sr.s);
+            if(sr.s===201||sr.s===200) console.log('SUCCESS: Submitted for App Store Review!');
+            else console.log('Submit response:',JSON.stringify(sr.b,null,2));
+          }
+          
+          main().catch(e=>{ console.log('Error:',e.message); process.exit(1); });
+          EOF
