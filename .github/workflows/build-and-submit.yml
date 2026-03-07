@@ -192,6 +192,12 @@ jobs:
             const ri = await call('POST',`/v1/reviewSubmissions/${rsId}/items`,{data:{type:'reviewSubmissionItems',relationships:{appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}});
             console.log('Add item: '+ri.s);
 
+            // Add appStoreVersion as review item
+            const itemR = await call('POST','/v1/reviewSubmissionItems',{data:{type:'reviewSubmissionItems',
+              relationships:{reviewSubmission:{data:{type:'reviewSubmissions',id:rsId}},
+                appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}}}});
+            console.log('Add item: '+itemR.s);
+
             // Submit
             const sr = await call('PATCH',`/v1/reviewSubmissions/${rsId}`,{data:{type:'reviewSubmissions',id:rsId,attributes:{action:'SUBMIT'}}});
             console.log('Submit: '+sr.s);
