@@ -111,6 +111,7 @@ jobs:
 
 
 
+
       - name: Submit for App Store Review
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -146,7 +147,7 @@ jobs:
           }
 
           async function main(){
-            // 1. Check if already in review
+            // 1. Check version state
             const vr=await call('GET',`/v1/apps/${APP_ID}/appStoreVersions?filter[platform]=IOS&filter[appStoreState]=PREPARE_FOR_SUBMISSION,WAITING_FOR_REVIEW,IN_REVIEW,PENDING_APPLE_RELEASE`);
             const versions=vr.b.data||[];
             console.log('Versions:',versions.map(v=>v.attributes.versionString+':'+v.attributes.appStoreState));
@@ -177,55 +178,35 @@ jobs:
             console.log('Assign build:',ar.s);
             await new Promise(r=>setTimeout(r,3000));
 
-            // 4. Delete all existing reviewSubmissions
+            // 4. Try submitting EXISTING reviewSubmissions with submitted:true
+            // (can't delete or cancel them, but we can try to submit them directly)
+            console.log('Getting existing submissions...');
             const existRS=await call('GET',`/v1/reviewSubmissions?filter[app]=${APP_ID}&filter[platform]=IOS`);
-            console.log('Found',existRS.b.data?.length||0,'existing submissions');
-            for(const rs of(existRS.b.data||[])){
+            const subs=existRS.b.data||[];
+            console.log('Found',subs.length,'existing submissions');
+
+            for(const rs of subs){
               const st=rs.attributes.state;
-              if(st==='IN_REVIEW'||st==='PENDING_APPLE_RELEASE'){console.log('Already reviewing:',st);return;}
+              console.log('Trying submission',rs.id,'state:',st);
+              if(st==='IN_REVIEW'||st==='PENDING_APPLE_RELEASE'||st==='WAITING_FOR_REVIEW'){
+                console.log('SUCCESS: Already under Apple review!'); return;
+              }
               if(st==='COMPLETE')continue;
-              console.log('Deleting submission',rs.id,'state:',st);
-              const dr=await call('DELETE',`/v1/reviewSubmissions/${rs.id}`);
-              console.log('Delete:',dr.s,dr.s!==204?JSON.stringify(dr.b).slice(0,200):'OK');
-              await new Promise(r=>setTimeout(r,2000));
+              // Try submitted:true on this existing submission
+              const sr=await call('PATCH',`/v1/reviewSubmissions/${rs.id}`,{
+                data:{id:rs.id,type:'reviewSubmissions',attributes:{submitted:true}}
+              });
+              console.log('Submit attempt:',sr.s,JSON.stringify(sr.b).slice(0,300));
+              if(sr.s===200||sr.s===201){
+                console.log('SUCCESS: I For Got Parking submitted for App Store Review!');
+                return;
+              }
             }
 
-            // 5. Create fresh reviewSubmission
-            console.log('Creating submission...');
-            const rsR=await call('POST','/v1/reviewSubmissions',{
-              data:{type:'reviewSubmissions',attributes:{platform:'IOS'},
-                relationships:{app:{data:{type:'apps',id:APP_ID}}}}
-            });
-            console.log('Create:',rsR.s,'state:',rsR.b.data?.attributes?.state);
-            if(rsR.s!==201){console.log(JSON.stringify(rsR.b,null,2));process.exit(1);}
-            const rsId=rsR.b.data.id;
-            await new Promise(r=>setTimeout(r,3000));
-
-            // 6. Add appStoreVersion as reviewSubmissionItem
-            console.log('Adding version item...');
-            const itemR=await call('POST','/v1/reviewSubmissionItems',{
-              data:{type:'reviewSubmissionItems',
-                relationships:{
-                  reviewSubmission:{data:{type:'reviewSubmissions',id:rsId}},
-                  appStoreVersion:{data:{type:'appStoreVersions',id:versionId}}
-                }}
-            });
-            console.log('Add item:',itemR.s,itemR.s!==201?JSON.stringify(itemR.b,null,2):'OK');
-            await new Promise(r=>setTimeout(r,3000));
-
-            // 7. Submit with submitted:true AND include appStoreVersion relationship
-            console.log('Submitting...');
-            const sr=await call('PATCH',`/v1/reviewSubmissions/${rsId}`,{
-              data:{id:rsId,type:'reviewSubmissions',
-                attributes:{submitted:true}}
-            });
-            console.log('Submit:',sr.s);
-            if(sr.s===200||sr.s===201){
-              console.log('SUCCESS: I For Got Parking submitted for App Store Review!');
-            } else {
-              console.log('ERROR:',JSON.stringify(sr.b,null,2));
-              process.exit(1);
-            }
+            // 5. If no existing worked, report full state for diagnosis
+            console.log('All existing submission attempts failed. States:',subs.map(s=>s.attributes.state));
+            console.log('Manual step needed: go to https://appstoreconnect.apple.com/apps/6760226960/distribution/ios/version/inflight and click Add for Review');
+            process.exit(1);
           }
           main().catch(e=>{console.log('Error:',e.message);process.exit(1);});
           JSEOF
